@@ -410,6 +410,24 @@ Request traces are the primary tool here: once we observe a required endpoint, w
 
 This is the minimum viable schema; adjust only when Terraform forces it.
 
+**Important**: even though MVP auth is permissive, we still want the emulator to have a notion of “known” tenants/subscriptions so that:
+- request traces can be grouped by tenant/subscription
+- strict-mode can be added later without a schema break
+- examples can explicitly “register” the IDs they use
+
+`tenants`:
+
+- `id text primary key` (tenant ID; UUID string)
+- `created_at timestamptz not null default now()`
+- `meta jsonb not null default '{}'::jsonb`
+
+`subscriptions`:
+
+- `id text primary key` (subscription ID; UUID string)
+- `tenant_id text not null references tenants(id)`
+- `created_at timestamptz not null default now()`
+- `meta jsonb not null default '{}'::jsonb`
+
 `resources` (single source of truth for ARM objects):
 
 - `id_norm text primary key` (lowercased resource ID)
@@ -463,6 +481,9 @@ Indexes:
 ### Store operations
 
 Implement these store functions first:
+
+- `UpsertTenant(ctx, tenantID) error`
+- `UpsertSubscription(ctx, subscriptionID, tenantID) error`
 
 - `UpsertResource(ctx, ResourceRecord) (created bool, err error)`
 - `GetResource(ctx, idNorm) (ResourceRecord, found bool, err error)`
@@ -603,7 +624,7 @@ Recommended for realistic Terraform runs:
 - `dns` (CoreDNS overrides for Azure domains)
 
 Optional (for deterministic integration test runs):
-- `terraform-runner` (container that runs Terraform against the stack)
+- per-example `terraform-*` runners (containers that run Terraform against the stack)
 
 ### Network & addressing
 
@@ -630,7 +651,8 @@ Plan:
 - `edge-proxy` container mounts:
 	- leaf cert/key (PEM)
 	- (optionally) full chain if required by proxy
-- `terraform-runner` container mounts:
+
+Per-example terraform runner containers mount:
 	- mkcert root CA PEM and installs it into container trust
 
 Minimum certificate names to cover:
@@ -674,6 +696,9 @@ If/when storage data plane becomes necessary:
 
 Purpose: run Terraform in a way that naturally uses CoreDNS + trusts mkcert.
 
+Implementation note:
+- Define one runner per example (e.g. `terraform-basic`) so each can set its own working directory, env file, and smoke command.
+
 Plan:
 - Container joins the same Compose network.
 - Container DNS is set to the `dns` service IP.
@@ -691,6 +716,201 @@ Acceptance check:
 - The API returns stable `id`/`name`/`type`/`etag` fields.
 
 ## Milestones / work breakdown
+
+## Testable implementation steps (16)
+
+Each step below is structured so it can be validated either by **unit tests** (`go test ./...`) or by running **examples** (primarily [examples/basic](../../../examples/basic)).
+
+### 1) Bootstrap IDs + register tenant/subscription (examples-first)
+
+**Goal**: Make it easy and deterministic to produce the IDs the whole system will use, and ensure the emulator can “know about” those IDs.
+
+**Deliverables**
+- Add `examples/basic/scripts/` with:
+	- `gen_ids.py`: generates and writes a dotenv file containing `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`.
+	- `register_ids.py`: idempotently inserts tenant/subscription into Postgres (`tenants`, `subscriptions`).
+- Update [examples/basic/README.md](../../../examples/basic/README.md) to document the scripts.
+
+**Implementation notes**
+- The registration script should:
+	- require `GS_DB_URL`
+	- read IDs from the dotenv file (default `examples/basic/.env.local`)
+	- use `psql` and `INSERT ... ON CONFLICT DO NOTHING`
+
+**How to test**
+- Example-level:
+	- Run `python3 examples/basic/scripts/gen_ids.py` and confirm it writes the file.
+	- Run `GS_DB_URL=... python3 examples/basic/scripts/register_ids.py` against a Postgres instance that already has the schema (once step 4 is done).
+
+### 2) Create `cmd/turquoise-api` skeleton + health endpoint
+
+**Goal**: Boot a server that can be hit in tests and in Compose.
+
+**Deliverables**
+- `cmd/turquoise-api/main.go` starts HTTP server, loads config, connects DB.
+- `GET /healthz` returns `200` (non-Azure endpoint; for ops/testing only).
+
+**How to test**
+- Unit/integration: `go test` can start the server with `httptest` and call `/healthz`.
+
+### 3) Host router + error envelope baseline
+
+**Goal**: Route by `Host` and always return JSON errors with request IDs.
+
+**Deliverables**
+- `Host` dispatch: ARM/AAD/Graph.
+- Unknown host => `404` JSON with `code=HostNotSupported`.
+
+**How to test**
+- Unit: table test for host routing (strip port, ignore case).
+
+### 4) Postgres migrations runner + initial schema (tenants/subscriptions/resources/operations/request_log)
+
+**Goal**: One command starts the server and the DB schema is ensured.
+
+**Deliverables**
+- Embedded SQL migrations.
+- `schema_migrations` tracking.
+- Tables: `tenants`, `subscriptions`, `resources`, `operations`, `request_log`.
+
+**How to test**
+- Integration (DB): run migrations against a real Postgres (docker) and assert tables exist.
+
+### 5) Request ID + correlation middleware
+
+**Goal**: Every response (success or error) has request IDs.
+
+**Deliverables**
+- Generate `x-ms-request-id`.
+- Propagate or generate `x-ms-correlation-request-id`.
+
+**How to test**
+- Unit: middleware wraps a handler and asserts headers present.
+
+### 6) Sanitized request logging to Postgres
+
+**Goal**: Persist traces without secrets.
+
+**Deliverables**
+- Insert one row per request with redacted body.
+- Never store `Authorization` or `client_secret`.
+
+**How to test**
+- Unit: redaction functions.
+- Integration: hit a handler with a secret in the body; assert DB contains redacted value.
+
+### 7) AAD-lite token endpoints (v1 + v2)
+
+**Goal**: Terraform can obtain an access token.
+
+**Deliverables**
+- `POST /{tenant}/oauth2/token` and `/oauth2/v2.0/token`.
+- HS256 JWT-like token with required claims.
+- On token issuance, `UpsertTenant` for the tenant.
+
+**How to test**
+- Unit: form parsing + claim validation.
+- Example: curl with form body returns token.
+
+### 8) ARM metadata endpoints
+
+**Goal**: Avoid client failures on metadata probes.
+
+**Deliverables**
+- `GET /metadata/endpoints?api-version=2020-06-01` minimal response.
+
+**How to test**
+- Unit: request returns 200 and JSON.
+
+### 9) Resource ID parser + canonicalization utilities
+
+**Goal**: Normalize IDs and extract subscription/rg/ns/type/name.
+
+**Deliverables**
+- `id_norm` lowercasing.
+- Extract fields and validate basic segment structure.
+
+**How to test**
+- Unit: many ID shapes and casing variants.
+
+### 10) ARM resource group CRUD + list
+
+**Goal**: `azurerm_resource_group` can converge.
+
+**Deliverables**
+- PUT/GET/DELETE/LIST with stable shapes and deterministic ordering.
+- On PUT, `UpsertSubscription` (from path `subId`) with a tenant mapping strategy:
+	- permissive: associate subscription to a “last seen tenant” from token claim `tid` when present; else a sentinel tenant.
+
+**How to test**
+- Integration: create RG, read it, list it, delete it.
+- Example: terraform apply/destroy (once step 14 is done).
+
+### 11) Generic resource CRUD (PUT/GET/DELETE)
+
+**Goal**: arbitrary ARM resources can be stored and read back.
+
+**Deliverables**
+- Generic handler using parsed resource ID.
+- Stable response fields and ETag.
+
+**How to test**
+- Unit: ETag determinism.
+- Integration: PUT then GET returns the same stored representation.
+
+### 12) Generic LIST + paging (`nextLink` + `$skiptoken`)
+
+**Goal**: Terraform refresh/list calls don’t flake.
+
+**Deliverables**
+- Deterministic ordering.
+- Cursor-based paging.
+
+**How to test**
+- Unit: paging returns all items exactly once.
+
+### 13) Graph stub frontend baseline
+
+**Goal**: Graph calls don’t crash the run; they produce actionable errors and traces.
+
+**Deliverables**
+- Default `501 NotImplemented` with JSON error.
+
+**How to test**
+- Unit: host route to Graph + response code.
+
+### 14) LRO operations table + async operation status endpoint
+
+**Goal**: Provide the polling endpoint Terraform expects.
+
+**Deliverables**
+- Create operation rows.
+- `GET /subscriptions/{subId}/providers/Microsoft.Resources/operationStatuses/{opId}`.
+
+**How to test**
+- Integration: create op, poll twice, see status transition.
+
+### 15) Enable LRO for storage accounts + VMs
+
+**Goal**: unblock storage account creation under Terraform if it requires async semantics.
+
+**Deliverables**
+- On eligible PUT/DELETE return `202` with `Azure-AsyncOperation`.
+- Deterministic poll-count completion.
+
+**How to test**
+- Integration: PUT storage account triggers `202` and operation completes.
+
+### 16) End-to-end terraform runner flow (examples/basic)
+
+**Goal**: prove MVP acceptance criteria.
+
+**Deliverables**
+- Containerized Terraform run (DNS + mkcert trust).
+- `init/apply/apply/destroy` passes.
+
+**How to test**
+- Example: run the documented container command and verify second apply is a no-op.
 
 ### M0: Scaffold
 

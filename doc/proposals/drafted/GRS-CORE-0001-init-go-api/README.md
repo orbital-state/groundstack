@@ -196,7 +196,7 @@ Planned repo artifacts (names may change):
 		- Provide a stable HS256 signing secret for AAD-lite tokens.
 
 	- Practical note (to make DNS deterministic in CI):
-		- Assign the DNS container a stable IP via Compose IPAM and point the terraform-runner container at it (or run Terraform within the same network namespace).
+		- Assign the DNS container a stable IP via Compose IPAM and point the per-example terraform runner container at it (or run Terraform within the same network namespace).
 
 ## Changelog
 - 2026-03-02: drafted

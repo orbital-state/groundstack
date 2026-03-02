@@ -1,0 +1,16 @@
+.:53 {
+    errors
+    health
+
+    # Allowlist-only overrides for control-plane endpoints (planned).
+    # Replace 172.28.0.2 with the edge-proxy IP on the examples network.
+    hosts {
+        172.28.0.2 management.azure.com
+        172.28.0.2 login.microsoftonline.com
+        172.28.0.2 graph.microsoft.com
+        fallthrough
+    }
+
+    forward . 1.1.1.1 8.8.8.8
+    cache 30
+}

@@ -1,0 +1,106 @@
+name: groundstack-examples
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: groundstack
+      POSTGRES_PASSWORD: groundstack
+      POSTGRES_DB: groundstack
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      groundstack:
+        aliases:
+          - postgres
+
+  # Go API service (enabled later once a Dockerfile exists)
+  turquoise-api:
+    profiles: ["stack"]
+    image: groundstack/turquoise-api:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      GS_LISTEN_ADDR: ":8080"
+      GS_DB_URL: "postgres://groundstack:groundstack@postgres:5432/groundstack?sslmode=disable"
+      GS_AUTH_HS256_SECRET: "dev-secret-change-me"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "18080:8080"
+    networks:
+      groundstack:
+        aliases:
+          - turquoise-api
+
+  # Planned: CoreDNS + edge proxy for intercepting Azure HTTPS domains.
+  # Included now as placeholders so every example can share the same network plan.
+  dns:
+    profiles: ["tlsdns"]
+    image: coredns/coredns:1.11.1
+    command: ["-conf", "/etc/coredns/Corefile"]
+    volumes:
+      - ./dns/Corefile:/etc/coredns/Corefile:ro
+    networks:
+      groundstack:
+        ipv4_address: 172.28.0.53
+
+  edge-proxy:
+    profiles: ["tlsdns"]
+    image: nginx:1.27-alpine
+    volumes:
+      - ./edge/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./edge/certs:/etc/nginx/certs:ro
+    depends_on:
+      - turquoise-api
+    ports:
+      - "10443:443"
+    networks:
+      groundstack:
+        ipv4_address: 172.28.0.2
+
+  terraform-basic:
+    profiles: ["tf"]
+    image: hashicorp/terraform:1.8
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ..:/work:rw
+    working_dir: /work/examples/basic
+    env_file:
+      - ./basic/.env.local
+    environment:
+      # NOTE: In realistic mode this container should also have:
+      # - DNS pointed at the `dns` service
+      # - mkcert root CA installed (once edge-proxy is wired)
+      TF_IN_AUTOMATION: "1"
+    command:
+      - sh
+      - -lc
+      - |
+        terraform init && \
+        terraform apply -auto-approve && \
+        terraform apply -auto-approve && \
+        terraform destroy -auto-approve
+    networks:
+      groundstack: {}
+
+volumes:
+  pgdata: {}
+
+networks:
+  groundstack:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
