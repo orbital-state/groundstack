@@ -1,0 +1,8 @@
+# Optional overrides
+# location             = "westeurope"
+# resource_group_name  = "gs-basic-rg"
+# storage_account_name = "gsbasicstor1234"
+# tags = {
+#   groundstack = "true"
+#   example     = "basic"
+# }
