@@ -23,8 +23,11 @@ TLS_KEY="$CERT_DIR/tls.key"
 TLS_CRT="$CERT_DIR/tls.crt"
 
 if [[ -s "$CA_CRT" && -s "$TLS_CRT" && -s "$TLS_KEY" ]]; then
-	echo "dev TLS certs already exist in: $CERT_DIR" >&2
-	exit 0
+	if [[ "${FORCE_REGEN:-}" != "1" ]]; then
+		echo "dev TLS certs already exist in: $CERT_DIR" >&2
+		echo "(set FORCE_REGEN=1 to regenerate with updated SANs)" >&2
+		exit 0
+	fi
 fi
 
 echo "generating dev CA + server certs in: $CERT_DIR" >&2
@@ -59,6 +62,12 @@ keyUsage = digitalSignature, keyEncipherment
 DNS.1 = management.azure.com
 DNS.2 = login.microsoftonline.com
 DNS.3 = graph.microsoft.com
+DNS.4 = *.blob.core.windows.net
+DNS.5 = *.file.core.windows.net
+DNS.6 = *.queue.core.windows.net
+DNS.7 = *.table.core.windows.net
+DNS.8 = *.dfs.core.windows.net
+DNS.9 = *.web.core.windows.net
 EOF
 
 openssl x509 -req -in "$SERVER_CSR" -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \

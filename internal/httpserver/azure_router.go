@@ -28,6 +28,17 @@ func newAzureRouter(store *memStore) http.Handler {
 			handleGraph(w, r)
 			return
 		default:
+			// Storage data plane endpoints (wildcard domains).
+			if strings.HasSuffix(host, ".blob.core.windows.net") ||
+				strings.HasSuffix(host, ".file.core.windows.net") ||
+				strings.HasSuffix(host, ".queue.core.windows.net") ||
+				strings.HasSuffix(host, ".table.core.windows.net") ||
+				strings.HasSuffix(host, ".dfs.core.windows.net") ||
+				strings.HasSuffix(host, ".web.core.windows.net") {
+				handleStorageDataPlane(w, r)
+				return
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"error":{"code":"HostNotFound","message":"unknown host"}}`)

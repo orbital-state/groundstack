@@ -8,6 +8,15 @@ COMPOSE_FILE="${COMPOSE_FILE:-${REPO_ROOT}/examples/docker-compose.yml}"
 
 STAGE="init"
 
+cleanup() {
+	# If the script is interrupted during `docker compose run`, the ephemeral container
+	# can be left behind and will keep a local backend state lock.
+	docker ps -aq --filter "name=groundstack-examples-terraform-basic-run-" | xargs -r docker rm -f >/dev/null 2>&1 || true
+	rm -f "${REPO_ROOT}/examples/basic/.terraform.tfstate.lock.info" >/dev/null 2>&1 || true
+}
+
+trap cleanup EXIT
+
 require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		echo "error: missing required command: $1" >&2
