@@ -23,5 +23,8 @@ func NewMux(dbStatus func() string) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
+
+	store := newMemStore()
+	mux.Handle("/", newAzureRouter(store))
 	return mux
 }

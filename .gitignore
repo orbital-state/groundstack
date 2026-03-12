@@ -34,3 +34,7 @@ go.work.sum
 # Terraform
 .terraform/
 .terraform.lock.hcl
+
+# Dev TLS material (generated locally)
+examples/edge/certs/*
+!examples/edge/certs/.gitkeep

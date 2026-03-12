@@ -47,14 +47,17 @@ GROUNDSTACK_UID="$(id -u)"
 export GROUNDSTACK_GID
 GROUNDSTACK_GID="$(id -g)"
 
+echo "==> Ensuring dev TLS certs exist (for edge-proxy)" >&2
+"${REPO_ROOT}/tests/gen-dev-tls-certs.sh"
+
 if [[ ! -f "$COMPOSE_FILE" ]]; then
 	echo "error: compose file not found: ${COMPOSE_FILE}" >&2
 	exit 2
 fi
 
-echo "==> Starting Postgres + turquoise-api (background)" >&2
+echo "==> Starting Postgres + turquoise-api + dns + edge-proxy (background)" >&2
 STAGE="stack"
-docker compose -f "$COMPOSE_FILE" --profile stack up -d --build postgres turquoise-api
+docker compose -f "$COMPOSE_FILE" --profile stack up -d --build postgres turquoise-api dns edge-proxy
 
 echo "==> Waiting for API health endpoint" >&2
 for _ in {1..60}; do

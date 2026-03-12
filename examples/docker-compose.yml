@@ -18,6 +18,7 @@ services:
       - pgdata:/var/lib/postgresql/data
     networks:
       groundstack:
+        ipv4_address: 172.28.0.10
         aliases:
           - postgres
 
@@ -46,7 +47,6 @@ services:
   # Planned: CoreDNS + edge proxy for intercepting Azure HTTPS domains.
   # Included now as placeholders so every example can share the same network plan.
   dns:
-    profiles: ["tlsdns"]
     image: coredns/coredns:1.11.1
     command: ["-conf", "/etc/coredns/Corefile"]
     volumes:
@@ -56,13 +56,10 @@ services:
         ipv4_address: 172.28.0.53
 
   edge-proxy:
-    profiles: ["tlsdns"]
     image: nginx:1.27-alpine
     volumes:
       - ./edge/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./edge/certs:/etc/nginx/certs:ro
-    depends_on:
-      - turquoise-api
     ports:
       - "10443:443"
     networks:
@@ -76,6 +73,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      dns:
+        condition: service_started
+      edge-proxy:
+        condition: service_started
     volumes:
       - ..:/work:rw
     working_dir: /work/examples/basic
@@ -86,9 +87,22 @@ services:
       # - DNS pointed at the `dns` service
       # - mkcert root CA installed (once edge-proxy is wired)
       TF_IN_AUTOMATION: "1"
+    dns:
+      - 172.28.0.53
     entrypoint: ["sh", "-lc"]
     command:
-      - terraform init && terraform apply -auto-approve && terraform apply -auto-approve && terraform destroy -auto-approve
+      - |
+        CA_SYSTEM="/etc/ssl/certs/ca-certificates.crt" && \
+        CA_GROUNDSTACK="/work/examples/edge/certs/ca.crt" && \
+        if [ -f "$$CA_SYSTEM" ] && [ -f "$$CA_GROUNDSTACK" ]; then \
+          cat "$$CA_SYSTEM" "$$CA_GROUNDSTACK" > /tmp/ca-bundle.crt; \
+          export SSL_CERT_FILE=/tmp/ca-bundle.crt; \
+          export CURL_CA_BUNDLE=/tmp/ca-bundle.crt; \
+        fi && \
+        terraform init && \
+        terraform apply -auto-approve && \
+        terraform apply -auto-approve && \
+        terraform destroy -auto-approve
     networks:
       groundstack: {}
 
