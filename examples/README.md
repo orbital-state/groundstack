@@ -14,6 +14,10 @@ All examples share a single Docker Compose stack located at:
 Start the DB:
 - `docker compose -f examples/docker-compose.yml up -d postgres`
 
+Start the Go API (optional):
+- `docker compose -f examples/docker-compose.yml --profile stack up -d --build`
+- Verify: `curl -fsS localhost:18080/healthz`
+
 Then for a specific example (e.g. `basic`):
 - `python3 examples/basic/scripts/gen_ids.py`
 - `GS_DB_URL=postgres://groundstack:groundstack@localhost:15432/groundstack?sslmode=disable \

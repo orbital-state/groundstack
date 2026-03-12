@@ -21,10 +21,11 @@ services:
         aliases:
           - postgres
 
-  # Go API service (enabled later once a Dockerfile exists)
+  # Go API service (opt-in via the `stack` profile)
   turquoise-api:
     profiles: ["stack"]
     image: groundstack/turquoise-api:dev
+    pull_policy: build
     build:
       context: ..
       dockerfile: Dockerfile
@@ -71,6 +72,7 @@ services:
   terraform-basic:
     profiles: ["tf"]
     image: hashicorp/terraform:1.8
+    user: "${GROUNDSTACK_UID:-1000}:${GROUNDSTACK_GID:-1000}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,14 +86,9 @@ services:
       # - DNS pointed at the `dns` service
       # - mkcert root CA installed (once edge-proxy is wired)
       TF_IN_AUTOMATION: "1"
+    entrypoint: ["sh", "-lc"]
     command:
-      - sh
-      - -lc
-      - |
-        terraform init && \
-        terraform apply -auto-approve && \
-        terraform apply -auto-approve && \
-        terraform destroy -auto-approve
+      - terraform init && terraform apply -auto-approve && terraform apply -auto-approve && terraform destroy -auto-approve
     networks:
       groundstack: {}
 
