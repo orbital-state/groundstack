@@ -72,6 +72,7 @@ One-command bootstrap (starts Postgres + generates IDs + registers them):
 	python3 examples/basic/scripts/register_ids.py`
 
 Notes:
+- `examples/basic/env.local.example` is the committed sample env file. Keep your local generated values in `examples/basic/.env.local`.
 - Registration is currently DB-first (no API dependency). If the `tenants` / `subscriptions` tables do not exist yet, `register_ids.py` will create them.
 - The generated `.env.local` can be sourced in a shell or used to pass env vars into `docker run`.
 - `register_ids.py` will use local `psql` if present; otherwise it will run `psql` inside the running Compose `postgres` container.
