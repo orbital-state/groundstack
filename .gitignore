@@ -26,7 +26,22 @@ go.work.sum
 
 # env file
 .env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
 
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+
+# Dev TLS material (generated locally)
+examples/edge/certs/*
+!examples/edge/certs/.gitkeep
