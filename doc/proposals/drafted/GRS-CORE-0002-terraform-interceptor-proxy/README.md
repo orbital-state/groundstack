@@ -34,6 +34,8 @@ This achieves “realistic interception” without requiring the developer machi
 
 ## Specification
 
+Implementation notes and common pitfalls are tracked in [impl-gotchas.md](impl-gotchas.md).
+
 ### 1) Add a Compose service: `tf-proxy`
 
 Add a new service to [examples/docker-compose.yml](../../../examples/docker-compose.yml) under an opt-in profile (e.g. `proxy`) so it does not affect the default DB-only developer workflow.
